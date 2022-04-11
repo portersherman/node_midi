@@ -11,8 +11,6 @@ const PARAMETERS: { [name: string]: Parameter } = {
     B: "b"
 };
 
-const FILEPATH: string = __dirname + "/../hueConfig.json";
-
 type Light = {
     name: string,
     r: number,
@@ -35,15 +33,17 @@ type Config = {
 }
 
 export class HueHandler implements Handler {
+    filepath: string = null;
     config: Config = null;
     lights: { [id: string]: Light } = {};
     networkController: NetworkController = null;
 
-    constructor(networkController: NetworkController) {
+    constructor(networkController: NetworkController, filepath: string) {
         this.networkController = networkController;
+        this.filepath = filepath;
 
         try {
-            this.config = JSON.parse(fs.readFileSync(FILEPATH, 'utf8'));
+            this.config = JSON.parse(fs.readFileSync(this.filepath, 'utf8'));
         } catch (error) {
             this.log("no config found, re-initializing");
         }
@@ -62,11 +62,17 @@ export class HueHandler implements Handler {
             return;
         }
 
-        let parameterTuples: Array<ParameterTuple> = this.config.parameterMap[message.controller];
+        if (!Object.keys(this.config.parameterMap).includes(message.controller.toString())) {
+            this.log("cc not present in parameterMap");
+            return;
+        }
+
+        let parameterTuples: Array<ParameterTuple> = this.config.parameterMap[message.controller.toString()];
+
         for (let i = 0; i < parameterTuples.length; i++) {
             let parameterTuple: ParameterTuple = parameterTuples[i];
 
-            console.log(`setting ${parameterTuple.parameter} for light ${parameterTuple.id} to ${message.value}`);
+            this.log(`setting ${parameterTuple.parameter} for light ${parameterTuple.id} to ${message.value}`);
 
             this.lights[parameterTuple.id][parameterTuple.parameter] = message.value;
         }
@@ -89,18 +95,27 @@ export class HueHandler implements Handler {
 
         this.log(message);
 
-        for (let id in Object.keys(this.lights)) {
+        this.broadcast();
+    }
+
+    broadcast = () => {
+        Object.keys(this.lights).forEach(id => {
             let light: Light = this.lights[id];
+
+            if (light.r === light.g && light.g === light.b) {
+                light.g *= .8;
+                light.b *= .5;
+            }
 
             let hsv = rgbToHsv(light.r, light.g, light.b);
 
-            this.networkController.put(`https://${this.config.ip}/api/${this.config.username}/lights/${id}/state`, {
+            this.networkController.put(`http://${this.config.ip}/api/${this.config.username}/lights/${id}/state`, {
                 on: hsv.bri !== 0,
                 hue: hsv.hue,
                 sat: hsv.sat,
                 bri: hsv.bri
             });
-        }
+        });
     }
 
     setup = async () => {
@@ -128,10 +143,11 @@ export class HueHandler implements Handler {
             let response: object;
 
             try {
-                response = await this.networkController.get(`https://${hubIp}/api/${username}/lights`);
+                response = (await this.networkController.get(`http://${hubIp}/api/${username}/lights`))["data"];
 
-                for (let id in Object.keys(response)) {
-                    if (response[id].capabilities.includes("color")) {
+                Object.keys(response).forEach(id => {
+
+                    if (Object.keys(response[id.toString()].capabilities.control).includes("colorgamut")) {
                         this.lights[id] = {
                             name: response[id].name,
                             r: 127,
@@ -139,14 +155,14 @@ export class HueHandler implements Handler {
                             b: 127
                         };
                     }
-                }
+                });
             } catch (error) {
                 throw new Error(`there was an error fetching Hue system metadata ${error}`);
             }
 
             let parameterMap: { [cc: number]: Array<ParameterTuple> } = {};
 
-            for (let id in Object.keys(this.lights)) {
+            Object.keys(this.lights).forEach(id => {
                 let ccNumberR: number = parseInt(prompt(`enter CC number for light R-intensity ${this.lights[id].name}: `));
                 let rParameterTuple = {
                     id: id,
@@ -182,7 +198,7 @@ export class HueHandler implements Handler {
                 } else {
                     parameterMap[ccNumberB] = new Array<ParameterTuple>(bParameterTuple)
                 }
-            }
+            });
 
             this.config = {
                 ip: hubIp,
@@ -195,14 +211,14 @@ export class HueHandler implements Handler {
             let json: string = JSON.stringify(this.config);
 
             try {
-                this.log(`writing file to ${FILEPATH}`);
-                fs.writeFileSync(FILEPATH, json, "utf8");
+                this.log(`writing file to ${this.filepath}`);
+                fs.writeFileSync(this.filepath, json, "utf8");
             } catch (error) {
                 this.log(error);
             }
         } else {
-            for (let id in Object.keys(this.config.metadata)) {
-                if (this.config.metadata[id].capabilities.includes("color")) {
+            Object.keys(this.config.metadata).forEach(id => {
+                if (Object.keys(this.config.metadata[id].capabilities.control).includes("colorgamut")) {
                     this.lights[id] = {
                         name: this.config.metadata[id].name,
                         r: 127,
@@ -210,7 +226,7 @@ export class HueHandler implements Handler {
                         b: 127
                     };
                 }
-            }
+            });
         }
 
         return;

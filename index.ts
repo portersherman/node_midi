@@ -36,13 +36,17 @@ const startMidiListener = async (handler) => {
 // set up Handler
 
 let handler: Handler;
+let filepath: string;
 
 if (process.env.FABRIC === "LOCAL") {
     console.log("local debugging session detected");
-    handler = new HueHandler(new DummyNetworkController());
+    filepath = __dirname + "/config-local.json";
+    handler = new HueHandler(new DummyNetworkController(), filepath);
 } else {
-    handler = new HueHandler(new AxiosWrapper());
+    filepath = __dirname + "/config.json";
+    handler = new HueHandler(new AxiosWrapper(), filepath);
 }
+
 handler.setup().then(() => {
     startMidiListener(handler).then((inputName: string) => {
         console.log(`listening for MIDI from ${inputName}`);

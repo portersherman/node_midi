@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "FABRIC=LOCAL node index.js",
-    "run": "node index.js"
+    "start": "node index.js"
   },
   "keywords": [],
   "author": "",
